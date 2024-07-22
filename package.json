@@ -1,9 +1,9 @@
 {
-  "name": "jump",
-  "displayName": "Jump",
+  "name": "jumpa",
+  "displayName": "JumpA",
   "description": "🏃‍♂️ Jump/Select to the Start/End of a word in VSCode",
-  "version": "0.7.10",
-  "publisher": "wenfangdu",
+  "version": "0.1.0",
+  "publisher": "ragusaen",
   "icon": "images/icon.png",
   "license": "MIT",
   "repository": {
@@ -48,50 +48,27 @@
     "word"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [],
   "contributes": {
     "commands": [
       {
-        "command": "jump-extension.jump-to-the-start-of-a-word",
-        "title": "Jump to the Start of a word"
-      },
-      {
-        "command": "jump-extension.jump-to-the-end-of-a-word",
-        "title": "Jump to the End of a word"
-      },
-      {
-        "command": "jump-extension.select-to-the-start-of-a-word",
-        "title": "Select to the Start of a word"
-      },
-      {
-        "command": "jump-extension.select-to-the-end-of-a-word",
-        "title": "Select to the End of a word"
+        "command": "jump-extension.primary-jump",
+        "title": "Jump using primary regexes"
       },
       {
         "command": "jump-extension.exit",
         "title": "Exit jump mode"
+      },
+      {
+        "command": "jump-extension.search-jump",
+        "title": "Jump using search"
+      },
+      {
+        "command": "jump-extension.inline-jump",
+        "title": "Jump within current line using detailed anchors"
       }
     ],
     "keybindings": [
-      {
-        "key": "alt+q alt+q",
-        "command": "jump-extension.jump-to-the-start-of-a-word",
-        "when": "editorTextFocus"
-      },
-      {
-        "key": "alt+q alt+w",
-        "command": "jump-extension.jump-to-the-end-of-a-word",
-        "when": "editorTextFocus"
-      },
-      {
-        "key": "alt+q alt+e",
-        "command": "jump-extension.select-to-the-start-of-a-word",
-        "when": "editorTextFocus"
-      },
-      {
-        "key": "alt+q alt+r",
-        "command": "jump-extension.select-to-the-end-of-a-word",
-        "when": "editorTextFocus"
-      },
       {
         "key": "escape",
         "command": "jump-extension.exit",
@@ -106,6 +83,21 @@
         "key": "enter",
         "command": "jump-extension.exit",
         "when": "editorTextFocus && jump.isInJumpMode"
+      },
+      {
+        "key": "ctrl + ;",
+        "command": "jump-extension.primary-jump",
+        "when": "editorTextFocus"
+      },
+      {
+        "key": "ctrl + shift + ;",
+        "command": "jump-extension.search-jump",
+        "when": "editorTextFocus"
+      },
+      {
+        "key": "ctrl + alt + ;",
+        "command": "jump-extension.inline-jump",
+        "when": "editorTextFocus"
       }
     ],
     "configuration": {
@@ -115,18 +107,33 @@
           "type": "string",
           "pattern": "^(?:([a-z0-9])(?!.*\\1))+$",
           "patternErrorMessage": "Please enter unique characters from [a-z0-9].",
-          "default": "acdefijklmnopqrsvwxz",
+          "default": "jfkdlsaghrueiwoqptyvncmxzb",
           "description": "Set of characters used to create jump key combinations. The first letters will occur the closest to the last cursor position."
         },
         "jump.display.backgroundColor": {
-          "type": "string",
-          "default": "#004455",
+          "type": "array",
+          "default": ["#004455"],
           "description": "Background of decoration."
         },
         "jump.display.color": {
-          "type": "string",
-          "default": "#0af0c1",
+          "type": "array",
+          "default": ["#0af0c1"],
           "description": "Text color of decoration."
+        },
+        "jump.primaryRegexes": {
+          "type": "array",
+          "default": ["\\w+()"],
+          "description": "List of regexes to use for jump. The jump happens to the last successfully matched group. For example, '\\w+()' jumps to the end of words; '\\[()\\]' jumps inside empty square brackets; '\\[()\\]|\\(()\\) jumps inside either empty square brackets or empty parentheses, depending on which case was matched."
+        },
+        "jump.wordRegexpFlags": {
+          "type": "string",
+          "default": "dg",
+          "description": "Flags to use for regexes."
+        },
+        "jump.jumpCooldown": {
+          "type": "integer",
+          "default": 350,
+          "description": "Time in milliseconds to cooldown after each key stroke when making a search jump. In this time, any keystroke will move the cursor right instead and reset the timer."
         }
       }
     }

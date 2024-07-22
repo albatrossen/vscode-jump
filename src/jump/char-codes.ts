@@ -41,6 +41,11 @@ const ALL_ALLOWED_CHARS = [
   '8',
 ]
 
+export interface CodeSet {
+  short: Array<string>
+  long: Array<string>
+}
+
 function combineElements(arrA: string[], arrB: string[], callback: (s: string) => void): void {
   const results: { text: string; i: number; j: number; t: number }[] = []
 
@@ -50,7 +55,7 @@ function combineElements(arrA: string[], arrB: string[], callback: (s: string) =
         i,
         j,
         text: arrA[i] + arrB[j],
-        t: i + j,
+        t: i + Math.floor(j / 8) * 8,
       })
     }
   }
@@ -68,14 +73,16 @@ function combineElements(arrA: string[], arrB: string[], callback: (s: string) =
     .forEach(elem => callback(elem.text))
 }
 
-export function createCharCodeSet(primaryCharacters = DEFAULT_PRIMARY_CHARS): string[] {
+export function createCharCodeSet(primaryCharacters = DEFAULT_PRIMARY_CHARS): CodeSet {
   const primaryChars = primaryCharacters.filter(char => ALL_ALLOWED_CHARS.includes(char))
   const secondaryChars = ALL_ALLOWED_CHARS.filter(char => !primaryChars.includes(char))
 
-  const codeSet: string[] = []
+  const codeSet: CodeSet = { short: [], long: [] }
   const callback = (str: string): void => {
-    codeSet.push(str)
+    codeSet.long.push(str)
   }
+
+  primaryChars.forEach((str: string) => codeSet.short.push(str))
 
   combineElements(primaryChars, primaryChars, callback)
   combineElements(primaryChars, secondaryChars, callback)

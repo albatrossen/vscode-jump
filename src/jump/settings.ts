@@ -6,9 +6,9 @@ import {
   ThemableDecorationRenderOptions,
   Uri,
   window,
-  workspace,
+  workspace
 } from 'vscode'
-import { createCharCodeSet } from './char-codes'
+import { CodeSet, createCharCodeSet } from './char-codes'
 import { ExtensionComponent } from './typings'
 
 export const enum SettingNamespace {
@@ -18,13 +18,13 @@ export const enum SettingNamespace {
 
 const enum Setting {
   UseIcons = 'useIcons',
-  WordRegexp = 'wordRegexp',
+  PrimaryRegexes = 'primaryRegexes',
   WordRegexpFlags = 'wordRegexpFlags',
-  WordRegexpEndOfWord = 'wordRegexpEndOfWord',
   PrimaryCharset = 'primaryCharset',
   FontFamily = 'fontFamily',
   FontSize = 'fontSize',
   CursorSurroundingLines = 'cursorSurroundingLines',
+  JumpCooldown = 'jumpCooldown',
 }
 
 const enum DisplaySetting {
@@ -34,45 +34,47 @@ const enum DisplaySetting {
 
 interface DecorationOptions {
   pad: number
-  color: string
+  colors: Array<string>
   width: number
   height: number
   fontSize: number
   fontFamily: string
-  backgroundColor: string
+  backgroundColors: Array<string>
   margin?: string
 }
 
 // Default values
-const DEFAULT_REGEX_FLAGS = 'gi'
-const DEFAULT_JUMP_REGEXP = /\w{2,}/g
-const DEFAUlT_JUMP_REGEXP_EOW = /(?<=\w{2})(\b|-|\s)/gi
 const DEFAULT_USE_ICONS = true
 
 const DATA_URI = Uri.parse('data:')
 
-const DEFAULT_COLOR = '#0af0c1'
-const DEFAULT_BACKGROUND_COLOR = '#004455'
-
 export class Settings implements ExtensionComponent {
   private decorationOptions: DecorationOptions
-  private codeOptions: Map<string, DecorationInstanceRenderOptions>
-  public codes: string[]
+  private textMarkOptions: DecorationOptions
+  private codeOptions: Map<number, Map<string, DecorationInstanceRenderOptions>>
+  public codes: CodeSet
   public decorationType: TextEditorDecorationType
-  public wordRegexp: RegExp
-  public endOfWordRegexp: RegExp
+  public textDecorationType: TextEditorDecorationType
+  public primaryRegexes: RegExp[]
   public charOffset: number
   public cursorSurroundingLines: number
+  public userRegexFlags: string
+  public jumpCooldown: number
 
   public constructor() {
     this.decorationOptions = {} as unknown as DecorationOptions
+    this.textMarkOptions = {} as unknown as DecorationOptions
     this.decorationType = window.createTextEditorDecorationType({})
+    this.textDecorationType = window.createTextEditorDecorationType({})
     this.codeOptions = new Map()
-    this.codes = []
-    this.wordRegexp = DEFAULT_JUMP_REGEXP
-    this.endOfWordRegexp = DEFAUlT_JUMP_REGEXP_EOW
+    this.codes = { short: [], long: [] }
+    this.primaryRegexes = []
     this.charOffset = 0
     this.cursorSurroundingLines = 0
+
+    const jumpConfig = workspace.getConfiguration(SettingNamespace.Jump)
+    this.userRegexFlags = jumpConfig[Setting.WordRegexpFlags]
+    this.jumpCooldown = jumpConfig[Setting.JumpCooldown]
   }
 
   public activate(): void {
@@ -80,16 +82,17 @@ export class Settings implements ExtensionComponent {
   }
 
   public deactivate(): void {
-    this.codes = []
+    this.codes = { short: [], long: [] }
     this.codeOptions.clear()
   }
 
-  public getOptions(code: string): DecorationInstanceRenderOptions {
-    return this.codeOptions.get(code) as DecorationInstanceRenderOptions
+  public getOptions(current_regex_index: number, code: string): DecorationInstanceRenderOptions {
+    return this.codeOptions.get(current_regex_index)?.get(code) as DecorationInstanceRenderOptions
   }
 
   public update(): void {
     this.buildDecorationType()
+    this.buildTextMarkDecorationType()
     this.buildWordRegexp()
     this.buildCharset()
     this.buildCodeOptions()
@@ -101,6 +104,7 @@ export class Settings implements ExtensionComponent {
       return true
     } else if (event.affectsConfiguration(SettingNamespace.Editor)) {
       this.buildDecorationType()
+      this.buildTextMarkDecorationType()
       this.buildCodeOptions()
       return true
     } else {
@@ -117,9 +121,9 @@ export class Settings implements ExtensionComponent {
 
     const fontFamily = editorConfig.get(Setting.FontFamily) as string
     const fontSize = editorConfig.get(Setting.FontSize) as number
-    const color = jumpConfig.get<string>(DisplaySetting.Color) ?? DEFAULT_COLOR
+    const colors = jumpConfig.get<Array<string>>(DisplaySetting.Color) ?? []
     // prettier-ignore
-    const backgroundColor = jumpConfig.get<string>(DisplaySetting.BackgroundColor) ?? DEFAULT_BACKGROUND_COLOR
+    const backgroundColors = jumpConfig.get<Array<string>>(DisplaySetting.BackgroundColor) ?? []
 
     const pad = 2 * Math.ceil(fontSize / (10 * 2))
     const width = fontSize + pad * 2
@@ -128,8 +132,8 @@ export class Settings implements ExtensionComponent {
       pad,
       fontSize,
       fontFamily,
-      color,
-      backgroundColor,
+      colors,
+      backgroundColors,
       width,
       height: fontSize,
     }
@@ -145,8 +149,6 @@ export class Settings implements ExtensionComponent {
       : {
           width: `${width}px`,
           height: `${fontSize}px`,
-          color,
-          backgroundColor,
         }
 
     this.decorationOptions = options
@@ -157,19 +159,63 @@ export class Settings implements ExtensionComponent {
     this.cursorSurroundingLines = editorConfig.get(Setting.CursorSurroundingLines) as number
   }
 
+  private buildTextMarkDecorationType(): void {
+    const jumpConfig = workspace.getConfiguration(SettingNamespace.Jump)
+    const editorConfig = workspace.getConfiguration(SettingNamespace.Editor)
+    const useIcons = jumpConfig.get<boolean>(Setting.UseIcons) ?? DEFAULT_USE_ICONS
+
+    this.charOffset = useIcons ? 2 : 0
+
+    const fontFamily = editorConfig.get(Setting.FontFamily) as string
+    const fontSize = editorConfig.get(Setting.FontSize) as number
+    const colors = jumpConfig.get<Array<string>>(DisplaySetting.Color) ?? []
+    // prettier-ignore
+    const backgroundColors = ["#AFBBA1"]
+
+    const pad = 2 * Math.ceil(fontSize / (10 * 2))
+
+    const options = {
+      pad,
+      fontSize,
+      fontFamily,
+      colors,
+      backgroundColors,
+      width: fontSize,
+      height: fontSize,
+    }
+
+    const decorationTypeOptions:
+      | ThemableDecorationAttachmentRenderOptions
+      | ThemableDecorationRenderOptions = useIcons
+      ? {
+          width: `${fontSize}px`,
+          height: `${fontSize}px`,
+          margin: `0 0 0 -${fontSize}px`,
+          textDecoration: `underline`,
+          opacity: `0.2`,
+        }
+      : {
+          width: `${fontSize}px`,
+          height: `${fontSize}px`,
+          textDecoration: `underline`,
+          opacity: `0.2`,
+        }
+
+    this.textDecorationType = window.createTextEditorDecorationType({
+      backgroundColor: backgroundColors[0],
+    })
+
+    this.textMarkOptions = options
+  }
+
   private buildWordRegexp(): void {
     const jumpConfig = workspace.getConfiguration(SettingNamespace.Jump)
-    const userWordRegex = jumpConfig[Setting.WordRegexp]
-    const userEndOfWordRegex = jumpConfig[Setting.WordRegexpEndOfWord]
-    const userWordRegexFlags = jumpConfig[Setting.WordRegexpFlags] ?? DEFAULT_REGEX_FLAGS
+    const userPrimaryRegexes = jumpConfig[Setting.PrimaryRegexes]
+    const userWordRegexFlags = jumpConfig[Setting.WordRegexpFlags]
 
-    if (userWordRegex?.length) {
-      this.wordRegexp = new RegExp(userWordRegex, userWordRegexFlags)
-    }
-
-    if (userEndOfWordRegex?.length) {
-      this.endOfWordRegexp = new RegExp(userEndOfWordRegex, userWordRegexFlags)
-    }
+    this.primaryRegexes = [
+      ...userPrimaryRegexes.map((regex_str: string) => new RegExp(regex_str, userWordRegexFlags)),
+    ]
   }
 
   private buildCharset(): void {
@@ -182,14 +228,22 @@ export class Settings implements ExtensionComponent {
   private buildCodeOptions(): void {
     const settings = workspace.getConfiguration(SettingNamespace.Jump)
     const useIcons = settings.get<boolean>(Setting.UseIcons) ?? DEFAULT_USE_ICONS
-    const [codePrefix, codeSuffix] = useIcons ? this.createCodeAffixes() : ['', '']
 
-    for (const code of this.codes) {
-      this.codeOptions.set(
-        code,
-        this.createRenderOptions(useIcons, `${codePrefix}${code}${codeSuffix}`),
-      )
+    for (let i = 0; i <= this.primaryRegexes.length; ++i) {
+      this.codeOptions.set(i, new Map())
+      for (const code of [...this.codes.short, ...this.codes.long]) {
+        const [codePrefix, codeSuffix] = useIcons
+          ? this.createCodeAffixes(i, code.length)
+          : ['', '']
+        this.codeOptions
+          .get(i)
+          ?.set(code, this.createRenderOptions(useIcons, `${codePrefix}${code}${codeSuffix}`))
+      }
     }
+  }
+
+  public createTextMarkOptions(length: number): DecorationInstanceRenderOptions {
+    return this.createRenderOptions(DEFAULT_USE_ICONS, this.createTextMarker(length))
   }
 
   private createRenderOptions(
@@ -213,16 +267,30 @@ export class Settings implements ExtensionComponent {
     }
   }
 
-  private createCodeAffixes(): [string, string] {
+  private createCodeAffixes(regex_index: number, code_length: number): [string, string] {
     // prettier-ignore
-    const { pad, fontSize, backgroundColor, fontFamily, color, width, height } = this.decorationOptions
+    const { pad, fontSize, backgroundColors, fontFamily, colors, width, height } = this.decorationOptions
     const halfOfPad = pad >> 1
 
+    const backgroundColor = backgroundColors[regex_index]
+    const color = colors[regex_index]
+
+    // Width is for 2 characters
+    const actual_width = (code_length * (width - pad)) / 2 + pad
+
     return [
-      `image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" height="${height}" width="${width}"><rect width="${width}" height="${height}" rx="2" ry="2" fill="${backgroundColor}"></rect><text font-family="${fontFamily}" font-size="${fontSize}px" textLength="${
-        width - pad
+      `image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${actual_width} ${height}" height="${height}" width="${actual_width}"><rect width="${actual_width}" height="${height}" rx="2" ry="2" fill="${backgroundColor}"></rect><text font-family="${fontFamily}" font-size="${fontSize}px" textLength="${
+        actual_width - pad
       }" fill="${color}" x="${halfOfPad}" y="${fontSize * 0.8}">`,
       `</text></svg>`,
     ]
+  }
+
+  private createTextMarker(length: number): string {
+    const { pad, fontSize, backgroundColors, fontFamily, colors, width, height } = this.textMarkOptions
+    const backgroundColor = backgroundColors[0]
+    const color = colors[0]
+    const actual_width = width * length + 2 * pad
+    return `image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${actual_width} ${fontSize}" height="${height}" width="${actual_width}"><rect width="${actual_width}" height="${height}" fill="${backgroundColor}"></rect><text font-family="${fontFamily}" font-size="${fontSize}px" textLength="${ actual_width - 2 * pad }" fill="${color}" x="${pad}" y="${fontSize * 0.8}"> </text></svg>`
   }
 }
