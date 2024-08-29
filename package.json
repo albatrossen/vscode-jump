@@ -65,7 +65,7 @@
       },
       {
         "command": "jump-extension.inline-jump",
-        "title": "Jump within current line using detailed anchors"
+        "title": "Jump within current line"
       }
     ],
     "keybindings": [
@@ -85,17 +85,17 @@
         "when": "editorTextFocus && jump.isInJumpMode"
       },
       {
-        "key": "ctrl + ;",
+        "key": "ctrl+;",
         "command": "jump-extension.primary-jump",
         "when": "editorTextFocus"
       },
       {
-        "key": "ctrl + shift + ;",
+        "key": "ctrl+shift+;",
         "command": "jump-extension.search-jump",
         "when": "editorTextFocus"
       },
       {
-        "key": "ctrl + alt + ;",
+        "key": "ctrl+alt+;",
         "command": "jump-extension.inline-jump",
         "when": "editorTextFocus"
       }
@@ -120,10 +120,20 @@
           "default": ["#0af0c1"],
           "description": "Text color of decoration."
         },
+        "jump.display.fontScale": {
+          "type": "number",
+          "default": 0.6,
+          "description": "Text color of decoration."
+        },
         "jump.primaryRegexes": {
           "type": "array",
           "default": ["\\w+()"],
-          "description": "List of regexes to use for jump. The jump happens to the last successfully matched group. For example, '\\w+()' jumps to the end of words; '\\[()\\]' jumps inside empty square brackets; '\\[()\\]|\\(()\\) jumps inside either empty square brackets or empty parentheses, depending on which case was matched."
+          "description": "List of regexes to use for normal jump. The jump happens to the last successfully matched group. For example, '\\w+()' jumps to the end of words; '\\[()\\]' jumps inside empty square brackets; '\\[()\\]|\\(()\\) jumps inside either empty square brackets or empty parentheses, depending on which case was matched."
+        },
+        "jump.inlineRegexes": {
+          "type": "array",
+          "default": ["\\w+()"],
+          "description": "List of regexes to use for jump. See primaryRegexes for more detail."
         },
         "jump.wordRegexpFlags": {
           "type": "string",

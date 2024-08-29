@@ -19,6 +19,7 @@ export const enum SettingNamespace {
 const enum Setting {
   UseIcons = 'useIcons',
   PrimaryRegexes = 'primaryRegexes',
+  InlineRegexes = 'inlineRegexes',
   WordRegexpFlags = 'wordRegexpFlags',
   PrimaryCharset = 'primaryCharset',
   FontFamily = 'fontFamily',
@@ -30,6 +31,7 @@ const enum Setting {
 const enum DisplaySetting {
   Color = 'display.color',
   BackgroundColor = 'display.backgroundColor',
+  FontScale = 'display.fontScale',
 }
 
 interface DecorationOptions {
@@ -56,6 +58,7 @@ export class Settings implements ExtensionComponent {
   public decorationType: TextEditorDecorationType
   public textDecorationType: TextEditorDecorationType
   public primaryRegexes: RegExp[]
+  public inlineRegexes: RegExp[]
   public charOffset: number
   public cursorSurroundingLines: number
   public userRegexFlags: string
@@ -69,6 +72,7 @@ export class Settings implements ExtensionComponent {
     this.codeOptions = new Map()
     this.codes = { short: [], long: [] }
     this.primaryRegexes = []
+    this.inlineRegexes = []
     this.charOffset = 0
     this.cursorSurroundingLines = 0
 
@@ -105,6 +109,8 @@ export class Settings implements ExtensionComponent {
     } else if (event.affectsConfiguration(SettingNamespace.Editor)) {
       this.buildDecorationType()
       this.buildTextMarkDecorationType()
+      this.buildWordRegexp()
+      this.buildCharset()
       this.buildCodeOptions()
       return true
     } else {
@@ -120,17 +126,20 @@ export class Settings implements ExtensionComponent {
     this.charOffset = useIcons ? 2 : 0
 
     const fontFamily = editorConfig.get(Setting.FontFamily) as string
-    const fontSize = editorConfig.get(Setting.FontSize) as number
+    const editorFontSize = editorConfig.get(Setting.FontSize) as number
+    const fontSizeScale = jumpConfig.get(DisplaySetting.FontScale) as number
     const colors = jumpConfig.get<Array<string>>(DisplaySetting.Color) ?? []
     // prettier-ignore
     const backgroundColors = jumpConfig.get<Array<string>>(DisplaySetting.BackgroundColor) ?? []
+
+    const fontSize = fontSizeScale * editorFontSize
 
     const pad = 2 * Math.ceil(fontSize / (10 * 2))
     const width = fontSize + pad * 2
 
     const options = {
       pad,
-      fontSize,
+      fontSize: editorFontSize,
       fontFamily,
       colors,
       backgroundColors,
@@ -144,7 +153,7 @@ export class Settings implements ExtensionComponent {
       ? {
           width: `${width}px`,
           height: `${fontSize}px`,
-          margin: `0 0 0 -${width}px`,
+          margin: `-${width}px 0 0 0`,
         }
       : {
           width: `${width}px`,
@@ -153,7 +162,7 @@ export class Settings implements ExtensionComponent {
 
     this.decorationOptions = options
     this.decorationType = window.createTextEditorDecorationType({
-      after: decorationTypeOptions,
+      before: decorationTypeOptions,
     })
 
     this.cursorSurroundingLines = editorConfig.get(Setting.CursorSurroundingLines) as number
@@ -184,23 +193,6 @@ export class Settings implements ExtensionComponent {
       height: fontSize,
     }
 
-    const decorationTypeOptions:
-      | ThemableDecorationAttachmentRenderOptions
-      | ThemableDecorationRenderOptions = useIcons
-      ? {
-          width: `${fontSize}px`,
-          height: `${fontSize}px`,
-          margin: `0 0 0 -${fontSize}px`,
-          textDecoration: `underline`,
-          opacity: `0.2`,
-        }
-      : {
-          width: `${fontSize}px`,
-          height: `${fontSize}px`,
-          textDecoration: `underline`,
-          opacity: `0.2`,
-        }
-
     this.textDecorationType = window.createTextEditorDecorationType({
       backgroundColor: backgroundColors[0],
     })
@@ -212,9 +204,14 @@ export class Settings implements ExtensionComponent {
     const jumpConfig = workspace.getConfiguration(SettingNamespace.Jump)
     const userPrimaryRegexes = jumpConfig[Setting.PrimaryRegexes]
     const userWordRegexFlags = jumpConfig[Setting.WordRegexpFlags]
+    const userInlineRegexes = jumpConfig[Setting.InlineRegexes]
 
     this.primaryRegexes = [
       ...userPrimaryRegexes.map((regex_str: string) => new RegExp(regex_str, userWordRegexFlags)),
+    ]
+
+    this.inlineRegexes = [
+      ...userInlineRegexes.map((regex_str: string) => new RegExp(regex_str, userWordRegexFlags)),
     ]
   }
 
@@ -229,7 +226,7 @@ export class Settings implements ExtensionComponent {
     const settings = workspace.getConfiguration(SettingNamespace.Jump)
     const useIcons = settings.get<boolean>(Setting.UseIcons) ?? DEFAULT_USE_ICONS
 
-    for (let i = 0; i <= this.primaryRegexes.length; ++i) {
+    for (let i = 0; i <= Math.max(this.primaryRegexes.length, this.inlineRegexes.length); ++i) {
       this.codeOptions.set(i, new Map())
       for (const code of [...this.codes.short, ...this.codes.long]) {
         const [codePrefix, codeSuffix] = useIcons
@@ -255,12 +252,12 @@ export class Settings implements ExtensionComponent {
 
     return {
       dark: {
-        after: {
+        before: {
           [key]: value,
         },
       },
       light: {
-        after: {
+        before: {
           [key]: value,
         },
       },
@@ -279,9 +276,9 @@ export class Settings implements ExtensionComponent {
     const actual_width = (code_length * (width - pad)) / 2 + pad
 
     return [
-      `image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${actual_width} ${height}" height="${height}" width="${actual_width}"><rect width="${actual_width}" height="${height}" rx="2" ry="2" fill="${backgroundColor}"></rect><text font-family="${fontFamily}" font-size="${fontSize}px" textLength="${
+      `image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${actual_width} ${height}" height="${height}" width="${actual_width}"><rect width="${actual_width}" height="${height}" rx="2" ry="2" fill="${backgroundColor}"></rect><text font-family="${fontFamily}" font-size="${height}px" textLength="${
         actual_width - pad
-      }" fill="${color}" x="${halfOfPad}" y="${fontSize * 0.8}">`,
+      }" fill="${color}" x="${halfOfPad}" y="${0.8 * height}">`,
       `</text></svg>`,
     ]
   }

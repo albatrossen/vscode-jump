@@ -10,6 +10,7 @@ import {
   Range,
   Selection,
   TextEditor,
+  TextLine,
   window,
   workspace,
 } from 'vscode'
@@ -46,6 +47,7 @@ interface JumpPositionMap {
 interface StateJumpActive {
   isInJumpMode: true
   isInSearchMode: boolean
+  isInInlineMode: boolean
   editor: TextEditor
   typedCharacters: string
   current_regex_index: number
@@ -56,6 +58,7 @@ interface StateJumpActive {
 interface StateJumpInactive {
   isInJumpMode: false
   isInSearchMode: false
+  isInInlineMode: false
   editor: undefined
   typedCharacters: string
   current_regex_index: number
@@ -78,6 +81,7 @@ const HANDLE_NAMES = [
 const DEFAULT_STATE: State = {
   isInJumpMode: false,
   isInSearchMode: false,
+  isInInlineMode: false,
   editor: undefined,
   typedCharacters: '',
   current_regex_index: 0,
@@ -165,8 +169,7 @@ export class Jump implements ExtensionComponent {
 
   private handleConfigChange = (event: ConfigurationChangeEvent): void => {
     if (this.state.isInJumpMode) {
-      this.state.decorations = new Map()
-      this.setDecorations(this.state.editor)
+      this.clearDecorations()
       this.settings.handleConfigurationChange(event)
       this.makeJumpAnchors()
     } else {
@@ -181,7 +184,13 @@ export class Jump implements ExtensionComponent {
 
     this.timeout && clearTimeout(this.timeout)
 
-    this.timeout = setTimeout(() => this.makeJumpAnchors(), 300)
+    this.timeout = setTimeout(() => {
+      if (this.state.isInInlineMode) {
+        this.makeInlineJumpAnchors()
+      } else if (!this.state.isInSearchMode) {
+        this.makeJumpAnchors()
+      }
+    }, 300)
   }
 
   private handleSelectionChange = (): void => {
@@ -189,7 +198,11 @@ export class Jump implements ExtensionComponent {
       return
     }
 
-    this.makeJumpAnchors()
+    if (this.state.isInInlineMode) {
+      this.makeInlineJumpAnchors()
+    } else if (!this.state.isInSearchMode) {
+      this.makeJumpAnchors()
+    }
   }
 
   private handleEditorChange = (editor: TextEditor | undefined): void => {
@@ -200,10 +213,13 @@ export class Jump implements ExtensionComponent {
     if (editor === undefined) {
       this.handleExitJumpMode()
     } else if (!this.state.isInSearchMode) {
-      this.state.decorations = new Map()
-      this.setDecorations(this.state.editor)
+      this.clearDecorations()
       this.state.editor = editor
-      this.makeJumpAnchors()
+      if (this.state.isInInlineMode) {
+        this.makeInlineJumpAnchors()
+      } else if (!this.state.isInSearchMode) {
+        this.makeJumpAnchors()
+      }
     }
   }
 
@@ -265,7 +281,31 @@ export class Jump implements ExtensionComponent {
   }
 
   private handleEnterInlineJumpMode = (): void => {
+    if (this.state.isInJumpMode) {
+      const next_regex_index =
+        (this.state.current_regex_index + 1) % this.settings.primaryRegexes.length
+      this.handleExitJumpMode()
+      this.state.current_regex_index = next_regex_index
+    }
 
+    const activeEditor = window.activeTextEditor
+    if (activeEditor === undefined) {
+      return
+    }
+
+    this.setJumpContext(true)
+    this.state.isInInlineMode = true
+
+    this.tryDispose(Command.Type)
+    this.handles[Command.Type] = commands.registerCommand(Command.Type, this.handleTypeEventInline)
+    this.handles[Command.ReplacePreviousChar] = commands.registerCommand(
+      Command.ReplacePreviousChar,
+      () => {},
+    )
+
+    this.state.editor = activeEditor
+
+    this.makeInlineJumpAnchors()
   }
 
   private clearDecorations = (): void => {
@@ -359,7 +399,6 @@ export class Jump implements ExtensionComponent {
   private handleTypeEventSearchMode = ({ text }: { text: string }): void => {
     this.state.typedCharacters += text.toLowerCase()
 
-    console.log(this.state.move_cursor_timer)
     if (this.state.decorations?.has(text.toLowerCase())) {
       const range = this.state.decorations?.get(text.toLowerCase())?.range
       if (!range) {
@@ -382,9 +421,10 @@ export class Jump implements ExtensionComponent {
       }, 1000)
 
       this.clearDecorations()
-    } else if (this.state.move_cursor_timer === undefined) {
+    } else if (this.state.move_cursor_timer === undefined && this.state.editor) {
       const all_positions = this.getMatchPositions(
         new RegExp(`${this.state.typedCharacters}(.)`, this.settings.userRegexFlags),
+        getVisibleLines(this.state.editor),
         64,
       )
 
@@ -429,6 +469,37 @@ export class Jump implements ExtensionComponent {
     }
   }
 
+  private handleTypeEventInline = ({ text }: { text: string }): void => {
+    // Ignore additional characters if the typed text is not prefix of some code
+    if (!this.typedTextIsUsable(this.state.typedCharacters + text.toLowerCase())) {
+      return
+    }
+
+    if (!TYPE_REGEX.test(text) || !this.state.isInJumpMode) {
+      this.state.typedCharacters = ''
+      return
+    }
+
+    this.state.typedCharacters += text.toLowerCase()
+
+    const code = this.state.typedCharacters
+    if (this.positions[code] !== undefined) {
+      const { line, char } = this.positions[code]
+
+      this.setSelection(line, char, text.toUpperCase() === text)
+
+      this.handleExitJumpMode()
+    } else {
+      // Remove non-matching decorations
+      this.state.decorations = new Map(
+        [...this.state.decorations.entries()].filter(([k]) =>
+          k.startsWith(this.state.typedCharacters),
+        ),
+      )
+      this.setDecorations(this.state.editor)
+    }
+  }
+
   private handleTypeLogEvent = (args: { text: string }): void => {
     if (window.activeTextEditor !== undefined) {
       const editor = window.activeTextEditor
@@ -469,7 +540,6 @@ export class Jump implements ExtensionComponent {
   }
 
   private setDecorations(editor: TextEditor): void {
-    console.trace()
     editor.setDecorations(this.settings.decorationType, [
       ...(this.state.decorations?.values() ?? []),
     ])
@@ -479,9 +549,12 @@ export class Jump implements ExtensionComponent {
     editor.setDecorations(this.settings.textDecorationType, ranges)
   }
 
-  private getMatchPositions(regex: RegExp, maxPositions: number): JumpPosition[] | undefined {
+  private getMatchPositions(
+    regex: RegExp,
+    lines: TextLine[],
+    maxPositions: number,
+  ): JumpPosition[] | undefined {
     const editor = this.state.editor ?? null
-    const lines = editor && getVisibleLines(editor)
 
     if (!editor || lines === null) {
       return undefined
@@ -490,22 +563,23 @@ export class Jump implements ExtensionComponent {
     const all_positions: JumpPosition[] = []
     let positionCount = 0
     for (let i = 0; i < linesCount && positionCount < maxPositions; ++i) {
-      const matches = [...lines[i].text.toLowerCase().matchAll(regex)]
+      const matches = [...lines[i].text.matchAll(regex)]
 
       for (const match of matches) {
         if (positionCount >= maxPositions) {
           break
         }
-        if (match.index === undefined) {
+        if (match.index === undefined || match.indices === undefined) {
           continue
         }
-        const match_char = match.indices?.findLast(m => m !== undefined)?.[0]
+        const match_idx = match.indices.findLastIndex(m => m !== undefined)
+        const match_char = match.indices[match_idx][0]
         all_positions.push({
           line: lines[i].lineNumber,
           // eslint-disable-next-line @typescript-eslint/ban-ts-comment
           //@ts-ignore
           char: match_char ?? match.index,
-          match: match[1],
+          match: match[match_idx] ?? match[0],
         })
         ++positionCount
       }
@@ -515,14 +589,40 @@ export class Jump implements ExtensionComponent {
 
   private makeJumpAnchors(): void {
     const scanRegexp = this.settings.primaryRegexes[this.state.current_regex_index]
-    if (scanRegexp === undefined) {
+    if (scanRegexp === undefined || this.state.editor === undefined) {
       return
     }
 
     this.positions = {}
     const maxDecorations = this.settings.codes.long.length
 
-    const all_positions = this.getMatchPositions(scanRegexp, maxDecorations)
+    const all_positions = this.getMatchPositions(
+      scanRegexp,
+      getVisibleLines(this.state.editor),
+      maxDecorations,
+    )
+    if (all_positions === undefined) {
+      return
+    }
+    this.showDecorations(all_positions)
+  }
+
+  private makeInlineJumpAnchors(): void {
+    const scanRegexp = this.settings.inlineRegexes[this.state.current_regex_index]
+    if (scanRegexp === undefined || this.state.editor === undefined) {
+      return
+    }
+
+    this.positions = {}
+    const maxDecorations = this.settings.codes.short.length
+
+    const current_selection = this.state.editor.selections[0]
+    const current_line = current_selection.active.line
+    const all_positions = this.getMatchPositions(
+      scanRegexp,
+      [this.state.editor.document.lineAt(current_line)],
+      maxDecorations,
+    )
     if (all_positions === undefined) {
       return
     }
@@ -535,7 +635,7 @@ export class Jump implements ExtensionComponent {
       return
     }
 
-    const [{ active }] = editor.selections.slice(-1)
+    const { active } = editor.selection
     all_positions.sort((a, b) =>
       Math.abs(a.line - active.line) !== Math.abs(b.line - active.line)
         ? Math.abs(a.line - active.line) - Math.abs(b.line - active.line)
@@ -552,7 +652,7 @@ export class Jump implements ExtensionComponent {
       const code = codes[index]
 
       const { line } = position
-      const char = position.char + this.settings.charOffset
+      const { char } = position
 
       this.positions[code] = position
       this.state.decorations?.set(code, {

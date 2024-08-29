@@ -1,6 +1,6 @@
 import { TextEditor, TextLine } from 'vscode'
 
-export function getVisibleLines(editor: TextEditor): null | TextLine[] {
+export function getVisibleLines(editor: TextEditor): TextLine[] {
   const { document } = editor
   const { visibleRanges, selections } = editor
 
